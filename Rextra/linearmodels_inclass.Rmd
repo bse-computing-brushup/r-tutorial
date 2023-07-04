@@ -1,0 +1,279 @@
+---
+title: "Linear models"
+author: "Instructor: Maxim Fedotov^[This handout is a re-adaptation of part of Jordi Llorens's materials who was teaching this brushup in the previous years. The original licence is located [here](https://github.com/Jordi-Llorens/r-tutorial/blob/master/LICENSE).]"
+date: "September 2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r, knitr_options, include=FALSE}
+    # loading in required packages
+    if (!require("mvtnorm")) install.packages("mvtnorm"); library(mvtnorm)
+```
+
+
+# Linear regression
+
+Linear regression is a fundamental foundation of statistics. Despite its observable simplicity, it is still used widely and is an origin of more sophisticated models. 
+
+Consider a setting where you have a dataset with $n$ observations of a form $\{(y_i, \mathrm{x}_i)\}_{i=1}^{n}$ where $y_i$ is an output variable. Linear regression assumes linear dependence between the output $y$ and the vector of regressors $\mathrm{x}$ together with persistence of random noise. That is, 
+$$y_i = \mathrm{x}_i^T \beta + \varepsilon_i$$
+where $\beta \in \mathbb{R}^{p}$ is a vector of coefficients, $\varepsilon = (\varepsilon_1, \ldots, \varepsilon_n) \sim \mathbb{P}_\varepsilon$ is a noise vector.
+
+The formulation can be rewritten in matrix notation:
+$$y = X \beta + \varepsilon,$$
+where $y \in \mathbb{R}^{n}$, $X \in \mathbb{n \times p}$ is a design matrix, $\varepsilon \in \mathbb{R}^{n}$.
+
+# Simulating data
+
+Let's first generate some artificial data for which we know the ground truth. We are going to write a function which allows to create a dataset of arbitrarily many dimensions (i.e. a vector of coefficients can be of any length). We assume that the regressors come from multivariate normal distribution.
+
+```{r sim.linmod}
+sim.linmod <- function(n, b, noise.sd, rho.x = 0) {
+    
+	# How many regressors?
+	p <- length(b)
+
+  # First, define a covariance matrix (Sigma) for the regressors. 
+	# Note: assume that an intercept is also included in b.
+  Sigma <- diag(p - 1)
+  Sigma[upper.tri(Sigma)] <- Sigma[lower.tri(Sigma)] <- rho.x
+  
+  # Draw the design matrix from a multivariate normal.
+	x <- rmvnorm(n, sigma = Sigma)
+
+  # Then generate y as a function of x and gaussian noise.
+  # A linear model of the form: y = Xb + e;
+  # use matrix multiplication operator
+	y <- cbind(1, x) %*% b + rnorm(n, sd = noise.sd)
+ 
+  # put x and y in a dataframe
+  data <- data.frame(y, x)
+
+  # rename all the x variables so that they have the following format:
+  # x1, x2, ...
+  names(data)[2:p] <- paste0("x", 1:(p - 1))
+
+  return(data)
+}
+
+# lets try it out
+set.seed(1234)
+data <- sim.linmod(200, c(5, 3, -2), 2, 0.3)
+head(data)
+
+# output should be:
+#           y         x1          x2
+# 1 -1.088649 -1.1509832  0.09103446
+# 2 11.527929  0.7159032 -2.15395689
+# 3  4.529436  0.5009523  0.56531759
+# 4  2.503199 -0.6510388 -0.62752183
+# 5  5.686707 -0.6929845 -0.96538910
+# 6  5.555835 -0.6231786 -1.05924053
+# ...
+```
+
+# Illustrate the data 
+
+We will first generate the data of lower dimension that can be easily visualized. We will use this data for the rest of the exercise.
+
+```{r trainData}
+
+set.seed(1234)
+trainData <- sim.linmod(200, c(5, 3), 2)
+head(trainData)
+
+# output should be:
+#            y         x1
+# 1  2.3492564 -1.2070657
+# 2  7.2258253  0.2774292
+# 3  8.6243514  1.0844412
+# 4 -0.6356261 -2.3456977
+# 5  6.9107361  0.4291247
+# 6  8.0390924  0.5060559
+# ...
+```
+
+Use the `ggplot2` package to create a nicely formatted scatter plot of the data. 
+
+```{r scatterplot, warning=F}
+library(ggplot2)
+# generate the figure
+figure <- ggplot(trainData, aes(x1, y)) +
+  geom_point(shape = 19, colour = 'gray') +
+  geom_smooth(method = lm, formula = y ~ x, se = TRUE, fullrange = T) +
+  scale_x_continuous(limits = c(0, 1.1))+
+  theme_bw()
+
+# show the figure in the report
+print(figure)
+```
+
+
+# Fitting linear models
+
+The classic estimator of the linear regression model is the ordinary least squares estimator, defined as the minimizer of the residual sum of squares
+
+$$\hat{\beta} = \textrm{argmin}_{\beta} (y - X\beta)^T (y - X\beta).$$
+
+The estimator has a closed form solution whenever $X^TX$ is invertible.
+
+$$\hat{\beta} = (X^T X)^{-1} X^T y.$$
+Although, it is worth mentioning that properties of this estimator depends on different conditions (e.g. see Gauss–Markov theorem).
+
+You will use this estimator to compute the regression weights in your `linearmodel` function. It should produce the same coefficients as the `lm` function built-in R. But before that, use the `lm` function and fit a linear model to the data.
+
+```{r}
+# regress y on x
+lmfit <- lm(y ~ x1, data = trainData)
+
+# use the "summary" command on results to get a more detailed overview of the
+# fit, you will get additional info like standard errors
+summary(lmfit)
+
+# extract the coefficients with SE's, t-statistics and p-values
+# note that this is a matrix so we can extract anything we like from here
+print(lmfit$coefficients)
+```
+
+Let's obtain diagnostic plots by using plot command on the output of the
+lm function (again, example of overloading the functions)
+```{r diagnostic plots}
+par(mfrow = c(2, 2))
+plot(lmfit)
+par(mfrow = c(1, 1))
+```
+
+
+Obtain predictions for the training data based on the fitted model
+```{r}
+trainPredictions <- fitted(lmfit)
+head(trainPredictions)
+```
+
+and compute the mean square error between predictions and true values, y
+```{r}
+trainMSE <- mean((trainPredictions - trainData$y)^2)
+trainMSE
+```
+How do you know how good is this? Compute now a mean square error 
+for the base model - a simple mean of the observed y values
+```{r}
+baseMSE <- mean((mean(trainData$y) - trainData$y)^2)
+baseMSE
+```
+
+so the model does a bit better obviously, however the true indicator of
+how well the model does is the generalization performance, predictions
+on the data it has not been fitted to. So, lets now create some new,
+test data.
+```{r}
+set.seed(4321)
+testData <- sim.linmod(100, c(5, 3), 2)
+head(testData)
+```
+and verify how our model predicts on it
+```{r}
+testPredictions <- predict(lmfit, testData)
+head(testPredictions)
+# compute the mean square error between predictions and true values, y
+testMSE <- mean((testPredictions - testData$y)^2)
+testMSE
+# and benchmark against MSE of just the sample mean of the training set
+test_baseMSE <- mean((mean(trainData$y) - testData$y)^2 )
+test_baseMSE
+```
+
+
+Extra: next, fit the linear model on the trainData 
+this time don't include the intercept in the model
+and include an additional variable that is a square root of absolute value of X.
+```{r}
+lmfit2 <-lm(y ~ x1 + sqrt(abs(x1)) - 1, data = trainData)
+lmfit2
+summary(lmfit2)
+```
+
+## Custom function to compute coefficients of a linear model (OLS).
+
+Now we will define our own function for fitting linear models, `linearmodel` function, that will use the closed form solution of least squares estimator to compute the weights.
+
+$$\hat{\beta} = (X^T X)^{-1} X^T y.$$
+```{r linearmodel}
+linearmodel <- function(data, intercept = TRUE) {
+
+    # we will assume that first column is the response variable
+    # an all others are having a form: x1, x2, ...
+    
+    # number of features
+    m <- ncol(data) - 1
+
+    # first we need to add a vector of 1's to our x (intercept),
+    # if instructed by the intercept argument
+    if (intercept) {
+        X <- cbind(1, as.matrix(data[, 2:(m + 1)]))
+    } else {
+        X <- as.matrix(data[, 2:(m + 1)])
+    }
+    y <- data$y
+
+    # now implement the analytical solution 
+    # using the matrix operations  
+    # hint: check "solve" command
+    bhat <- solve(t(X) %*% X) %*% t(X) %*% y
+
+    # compute the predictions for the training data, i.e. fitted values
+    yhat <- X %*% bhat
+
+    # compute the mean square error for the training data, between y and yhat
+    MSE <- mean((yhat - y)^2)
+
+    return(list(coef = bhat, predictions = yhat, MSE = MSE))
+}
+
+# check out the function
+lmmefit <- linearmodel(trainData)
+lmmefit$coef
+
+# compare it to the output of the lm function
+coefficients(lmfit) 
+```
+
+# Illustrate the data and your model predictions
+
+We will now create a plot where we illustrate our predictions.
+
+```{r scatterplot_fit}
+
+# first create an additional data frame with x1 variable from trainData as one
+# column and predictions from the model, yhat, as a second model
+predData <- data.frame(x1 = trainData$x1, yhat = lmmefit$predictions) 
+
+# generate the figure
+figure <- 
+    ggplot(trainData, aes(y = y, x = x1)) + 
+    geom_point(size = 1.5, color = "#992121") +
+
+    # you will need to use geom_line, but now with
+    # predData, to illustrate the linearmodel fit
+    geom_line(data = predData, aes(x = x1, y = yhat), 
+              color = "blue") +
+
+    theme(
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.line.x = element_blank(),
+        axis.line.y = element_blank(),
+        axis.ticks = element_line(lineend = 4, linetype = 1, 
+                                  colour = "black", size = 0.3), 
+        axis.text = element_text(colour = "black"),
+        axis.text.x = element_text(vjust = 0.5),
+        validate = TRUE
+    )
+
+# show the figure in the report
+print(figure)
+```
